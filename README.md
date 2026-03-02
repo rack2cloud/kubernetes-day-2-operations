@@ -26,7 +26,7 @@ When a storage placement decision creates a cross-zone network bottleneck, teams
 
 ## System Model
 
-![Intersecting Control Loops](https://www.rack2cloud.com/wp-content/uploads/2026/02/diagram-k8s-control-loops.jpg)
+![Intersecting Control Loops](https://www.rack2cloud.com/wp-content/uploads/2026/02/kubernetes_intersecting-control-loop.jpg)
 
 **The 4 Intersecting Loops:**
 1. **Identity Loop:** Authenticates the request (ServiceAccount → Cloud IAM/Entra ID).
