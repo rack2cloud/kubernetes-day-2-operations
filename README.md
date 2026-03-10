@@ -10,6 +10,8 @@
 ## 📚 Canonical Architecture Reference  
 This repository contains the diagnostic frameworks, failure signatures, and CLI triage protocols for debugging complex Kubernetes outages across AWS, Azure, and GCP.
 
+**New: 5 Real-World Failure Signatures & The Metrics That Predict Them** 👉 [https://www.rack2cloud.com/kubernetes-day-2-failures/](https://www.rack2cloud.com/kubernetes-day-2-failures/)
+
 **Want the full diagnostic theory and Azure-native checklists?** 👉 [Download the formatted PDF Playbook here](https://www.rack2cloud.com/architecture-failure-playbooks/)
 
 **The continuously maintained master index lives here:** 👉 [https://www.rack2cloud.com/kubernetes-day-2-operations-guide/](https://www.rack2cloud.com/kubernetes-day-2-operations-guide/)
@@ -38,13 +40,13 @@ When a storage placement decision creates a cross-zone network bottleneck, teams
 
 ## Failure Signature & Mitigation Model
 
-| Symptom / Error | Failing Loop | Root Cause Physics | Mitigation Strategy |
-| :--- | :--- | :--- | :--- |
-| **`ImagePullBackOff`** | **Identity** | The registry is up, but the Node's STS/OIDC token expired or clock drifted. | Ephemeral workload identity; remove static secrets; monitor IMDS reachability. |
-| **Pending Pods (<50% CPU)** | **Compute** | Scheduler bin-packing fragmentation, or `maxUnavailable: 0` PDB deadlocks. | Soften affinity rules (`ScheduleAnyway`); audit strict Requests/Limits. |
-| **`502/504 Gateway Timeout`** | **Network** | MTU packet fragmentation drops, or `NodePort` health check mismatches. | Lower CNI MTU to account for overlay headers; spoof Host headers to test paths. |
-| **AZ Node Affinity Conflict** | **Storage** | Disk was created in Zone A, but Scheduler wants to place Pod in Zone B. | Enforce `volumeBindingMode: WaitForFirstConsumer` on all StatefulSets. |
-
+| Symptom / Error | Failing Loop | Root Cause Physics | Key Metric | Mitigation Strategy |
+| :--- | :--- | :--- | :--- | :--- |
+| **`ImagePullBackOff` / `CrashLoopBackOff`** | **Identity** | The registry is up, but the Node's STS/OIDC token expired or clock drifted. Auth fails silently — container crashes before writing useful logs. | `kube_pod_container_status_restarts_total` + exit code from `kubectl describe pod` | Ephemeral workload identity; remove static secrets; monitor IMDS reachability. |
+| **Pending Pods (<50% CPU)** | **Compute** | Scheduler bin-packing fragmentation — allocatable headroom exhausted even when utilisation looks low. `maxUnavailable: 0` PDB deadlocks compound this. | `kube_node_status_allocatable` vs `kube_pod_resource_requests_cpu_cores` sum by node | Soften affinity rules (`ScheduleAnyway`); audit strict Requests/Limits ratio. |
+| **`502/504 Gateway Timeout`** | **Network** | MTU mismatch between overlay (VXLAN/Geneve) and underlying NIC. Large packets silently dropped — no ICMP response in cloud provider networks. Presents as DNS until proven otherwise. | `node_network_receive_drop_total` + `node_network_transmit_drop_total` per overlay interface | Lower CNI MTU to account for overlay headers; spoof Host headers to test paths. |
+| **PVC Stuck / Pod in `ContainerCreating`** | **Storage** | Block storage is zonal. Pod rescheduled across AZ after node failure — volume can't follow. Default storage classes don't use `WaitForFirstConsumer`. | `kube_persistentvolumeclaim_status_phase{phase="Pending"}` correlated with volume attach events | Enforce `volumeBindingMode: WaitForFirstConsumer` on all StatefulSets. |
+| **API Server Timeouts / Controller Flapping** | **Control Plane** | etcd I/O-bound — write-ahead log hits disk IOPS ceiling under burst. etcd heartbeat latency increases, API server queues requests, controllers lose sync. Workload layer looks healthy while control plane drowns. | `etcd_disk_wal_fsync_duration_seconds_bucket` p99 > 10ms = warning, > 100ms = critical. `apiserver_request_duration_seconds_bucket` p99 climbing with no traffic increase = control-plane problem. | Dedicated low-latency disk for etcd (gp3 minimum, io2 preferred); separate etcd nodes from workload nodes; monitor WAL fsync p99 continuously. On managed K8s (EKS/AKS/GKE): monitor API server latency as the proxy metric. |
 ---
 
 ## Zero-Trust Day 2 Requirements
